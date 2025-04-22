@@ -60,42 +60,56 @@ for y, values in grouped.items():
     sorted_vals = sorted(values, reverse=True)
     sorted_lists.append(sorted_vals[:365])
 avg_flows = np.mean(sorted_lists, axis=0)
-days = np.arange(1, len(avg_flows) + 1)
+avg_flows = avg_flows[:365]
+days = np.arange(1, 366)
 y_max_main = max(max(avg_flows), threshold_val) * 1.1
-x_max_main = int(days[-1])
-chart_df = pd.DataFrame({'Päev': days, 'Keskmine vooluhulk': avg_flows})
+sorted_thresholds = []
+for y, values in grouped.items():
+    threshold_y = HEJ + VTT + KP
+    sorted_thresholds.append([threshold_y]*365)
+mean_thresholds = np.mean(sorted_thresholds, axis=0)
+
+chart_df = pd.DataFrame({'Päev': days, 'Keskmine vooluhulk': avg_flows, 'Lävi': mean_thresholds})
 chart = alt.Chart(chart_df).mark_line().encode(
-    x=alt.X('Päev:Q', title='Päev', scale=alt.Scale(domain=[0, x_max_main])),
+    x=alt.X('Päev:Q', title='Päev', scale=alt.Scale(domain=[1, 365])),
     y=alt.Y('Keskmine vooluhulk:Q', title='Keskmine vooluhulk (m³/s)', scale=alt.Scale(domain=[0, y_max_main])),
     tooltip=[alt.Tooltip('Päev:Q', title='Päev'), alt.Tooltip('Keskmine vooluhulk:Q', title='Keskmine vooluhulk (m³/s)')]
 ).properties(title=f'Sorteeritud keskmised vooluhulgad (laskuv) ({start_year}-{end_year})', height=400)
-threshold = HEJ + VTT + KP
-intersect_idx = np.where(avg_flows <= threshold)[0]
+
+threshold_line = alt.Chart(chart_df).mark_line(color='teal', strokeDash=[5, 5]).encode(
+    x='Päev:Q',
+    y='Lävi:Q',
+    tooltip=[alt.Tooltip('Päev:Q', title='Päev'), alt.Tooltip('Lävi:Q', title='Lävi (m³/s)')]
+)
+chart = chart + threshold_line
+threshold_text_right = alt.Chart(pd.DataFrame({'Päev': [365], 'Keskmine vooluhulk': [mean_thresholds[-1]]})).mark_text(
+    color='teal', align='right', dx=-5, dy=5
+).encode(
+    x='Päev:Q',
+    y='Keskmine vooluhulk:Q',
+    text=alt.value(f"HEJ + BTT + KALAPÄÄS = {threshold_fmt}")
+)
+chart = chart + threshold_text_right
+
+intersect_idx = np.where(avg_flows <= threshold_val)[0]
 if len(intersect_idx) > 0:
     intercept_day = int(days[intersect_idx[0]])
-    dot = alt.Chart(pd.DataFrame({'Päev': [intercept_day], 'Keskmine vooluhulk': [threshold]})).mark_point(color='red', size=60).encode(x='Päev:Q', y='Keskmine vooluhulk:Q')
+    dot = alt.Chart(pd.DataFrame({'Päev': [intercept_day], 'Keskmine vooluhulk': [threshold_val]})).mark_point(color='red', size=60).encode(x='Päev:Q', y='Keskmine vooluhulk:Q')
     chart = chart + dot
     days_unaffected = intercept_day - 1
     percent_unaffected = int(round(days_unaffected / 365 * 100))
     max_flow = max(avg_flows)
-    area_df = pd.DataFrame({'x1': [intercept_day], 'x2': [len(days)], 'y1': [0], 'y2': [VTT]})
+    area_df = pd.DataFrame({'x1': [intercept_day], 'x2': [365], 'y1': [0], 'y2': [VTT]})
     area = alt.Chart(area_df).mark_area(color='yellow', opacity=0.3).encode(x='x1:Q', x2='x2:Q', y='y1:Q', y2='y2:Q')
     chart = chart + area
     vline = alt.Chart(pd.DataFrame({'Päev': [intercept_day]})).mark_rule(color='red').encode(x='Päev:Q')
     chart = chart + vline
-    ann_text = f"{days_unaffected} PÄEVA ({percent_unaffected}%) AASTAS EI MÕJUTA BTT\nSILLAORU LÄVENDIS ENERGEETILIST\n\nPOTENSIAALI"
+    ann_text = f"{days_unaffected} PÄEVA\n({percent_unaffected}%) AASTAS EI MÕJUTA BTT\nSILLAORU LÄVENDIS ENERGEETILIST\n\nPOTENSIAALI"
     ann = alt.Chart(pd.DataFrame({'Päev': [intercept_day], 'Keskmine vooluhulk': [max_flow], 'text': [ann_text]})).mark_text(align='left', dx=5, dy=-10, color='red').encode(x='Päev:Q', y='Keskmine vooluhulk:Q', text='text:N')
     chart = chart + ann
-    days_left = len(days) - intercept_day
+    days_left = 365 - intercept_day
 else:
-    days_left = len(days)
-threshold_line = alt.Chart(pd.DataFrame({'threshold': [threshold]})).mark_rule(color='teal').encode(y='threshold:Q')
-threshold_text = alt.Chart(pd.DataFrame({'threshold': [threshold]})).mark_text(color='teal', align='left', dx=5, dy=5).encode(
-    x=alt.value(10),
-    y='threshold:Q',
-    text=alt.value(f"HEJ + BTT + KALAPÄÄS = {threshold_fmt}")
-)
-chart = chart + threshold_line + threshold_text
+    days_left = 365
 selector = alt.selection_point(fields=['Päev'], nearest=True, on='mouseover', empty='none')
 selectors = alt.Chart(chart_df).mark_point().encode(
     x='Päev:Q',
@@ -111,15 +125,16 @@ hover_rules = alt.Chart(chart_df).mark_rule(color='gray').encode(
 ).transform_filter(selector)
 chart = chart + selectors + hover_points + hover_rules
 
-tabs = st.tabs(["Graafik", "Vaata andmeid"])
+tabs = st.tabs(["Graafik", "Vaata andmeid", "Tingimusvorming"])
 
 with tabs[0]:
-    st.altair_chart(chart, use_container_width=True)
+    col1, col2 = st.columns([20, 1])
+    with col1:
+        st.altair_chart(chart, use_container_width=True)
+    with col2:
+        if st.button("🔄", help="Värskenda graafikut"):
+            st.rerun()
     if len(intersect_idx) > 0:
-        st.markdown(
-            f"<span style='color:gray'>BTT ei mõjuta {days_unaffected} päeva ({percent_unaffected}%) aastas.</span>",
-            unsafe_allow_html=True
-        )
         g = 9.81
         H_const = 8.0
         efficiency = 0.8
@@ -139,7 +154,7 @@ with tabs[0]:
         year_potentials = {}
         for y, vals in grouped.items():
             sorted_vals = sorted(vals, reverse=True)[:365]
-            intercept_idx = next((i for i, v in enumerate(sorted_vals) if v <= threshold), len(sorted_vals))
+            intercept_idx = next((i for i, v in enumerate(sorted_vals) if v <= threshold_val), len(sorted_vals))
             days_left_y = len(sorted_vals) - intercept_idx
             year_potentials[y] = P_kw_2 * 24 * days_left_y
     max_year = max(year_potentials, key=year_potentials.get)
@@ -176,3 +191,24 @@ with tabs[1]:
     raw_filtered["date"] = raw_filtered["date"].dt.strftime("%Y-%m-%d")
     raw_filtered = raw_filtered.rename(columns={"date": "Kuupäev", "flow": "Vooluhulk (m³/s)"})
     st.dataframe(raw_filtered, use_container_width=True)
+
+with tabs[2]:
+    st.markdown(f"### Tingimusvorming: Aastate võrdlus ({start_year} - {end_year})")
+    tingimus_data = {}
+    max_days = max(len(vals) for _, vals in grouped.items()) if not grouped.empty else 366
+    for y, values in grouped.items():
+        sorted_vals = sorted(values, reverse=True)
+        if len(sorted_vals) < 366:
+            sorted_vals += [np.nan] * (366 - len(sorted_vals))
+        tingimus_data[y] = sorted_vals[:366]
+    tingimus_df = pd.DataFrame(tingimus_data)
+    tingimus_df = tingimus_df[list(sorted(tingimus_data.keys(), reverse=False))]
+    tingimus_df.index = [f"{i+1}." for i in range(366)]
+    styled_df = tingimus_df.style.background_gradient(cmap="Reds", axis=None)
+    st.dataframe(styled_df, use_container_width=True)
+    max_value = tingimus_df.max().max()
+    min_value = tingimus_df.min().min()
+    max_year = tingimus_df.columns[(tingimus_df == max_value).any()].tolist()[0]
+    min_year = tingimus_df.columns[(tingimus_df == min_value).any()].tolist()[0]
+    st.markdown(f"Valitud perioodi maksimum on <b>{max_value:.2f}</b> aastal <b>{max_year}</b>", unsafe_allow_html=True)
+    st.markdown(f"Valitud perioodi miinimum on <b>{min_value:.2f}</b> aastal <b>{min_year}</b>", unsafe_allow_html=True)
