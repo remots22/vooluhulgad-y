@@ -1,0 +1,3 @@
+.next/
+.streamlit/secrets.toml
+app copy.py
